@@ -1,0 +1,60 @@
+from fastapi import FastAPI, File, UploadFile
+import uvicorn
+import numpy as np
+from io import BytesIO
+from PIL import Image
+import tensorflow as tf
+import requests
+
+
+app = FastAPI()
+
+endpoint = "http://localhost:8501/v1/models/potatoes_model:predict"
+
+#MODEL = tf.keras.models.load_model("C:/Users/Apurva/Desktop/Projects/Potato Disease Classification/saved_models/v0.1.h5")
+CLASS_NAMES = ['Early Blight', 'Late Blight', 'Healthy']
+
+@app.get("/ping")
+async def ping():
+    return "I am pinging..."
+
+def read_file_as_image(data) -> np.ndarray:
+    image = np.array(Image.open(BytesIO(data)))
+    return image
+    
+
+
+@app.post("/predict")
+async def predict(
+    file: UploadFile = File(...)    #after : is for validation, inbuilt in fastapi
+):
+    #await - while 1st req take 2s to read, it will put this func in suspend mode
+    #to serve the 2nd req
+    image = read_file_as_image(await file.read())
+    image_batch = np.expand_dims(image, 0)
+    json_data = {
+        "instances": image_batch.tolist()
+    }
+
+    response = requests.post(endpoint, json=json_data)
+    # print("Response from TensorFlow model:", response.json())
+
+    # if "prediction" not in response.json():
+    #     return {"error": "Prediction key not found in the response from the model server."}
+    prediction = np.array(response.json()["predictions"][0])
+
+    predicted_class = CLASS_NAMES[np.argmax(prediction)]
+    confidence = np.max(prediction)
+
+    return {
+        'class': predicted_class,
+        'confidence': float(confidence)
+    }
+
+if __name__ == '__main__':
+    uvicorn.run(app, host='localhost', port=8000)
+    
+#USE THIS DOCKER COMMAND TO RUN THE FILE
+#docker run -t --rm -p 8501:8501 -v C:/Users/Apurva/Desktop/Projects/potato_disease_classification:/potato-disease -v 
+# C:/Users/Apurva/Desktop/Projects/potato_disease_classification/training/models.config:/potato-disease/models.config 
+# tensorflow/serving --rest_api_port=8501 --model_config_file=/potato-disease/models.config
